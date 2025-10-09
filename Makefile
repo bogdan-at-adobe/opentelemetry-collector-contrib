@@ -691,3 +691,44 @@ checks:
 	$(MAKE) -j4 generate
 	$(MAKE) multimod-verify
 	git diff --exit-code || (echo 'Some files need committing' && git status && exit 1)
+
+# Open a PR to invite a new triager
+# Usage: make add-triager NAME="Full Name" GITHUB_USER="github-username" COMPANY="Company Name"
+.PHONY: add-triager
+add-triager:
+	@if [ -z "$$NAME" ] || [ -z "$$GITHUB_USER" ] || [ -z "$$COMPANY" ]; then \
+		echo "Usage: make add-triager NAME=\"Full Name\" GITHUB_USER=\"github-username\" COMPANY=\"Company Name\""; \
+		exit 1; \
+	fi; \
+	CURRENT_BRANCH=$$(git branch --show-current); \
+	if [ "$$CURRENT_BRANCH" != "main" ]; then \
+		git checkout main || exit 1; \
+	fi; \
+	BRANCH_NAME="add_$${GITHUB_USER}_triager"; \
+	git checkout -b "$$BRANCH_NAME" 2>/dev/null || git checkout "$$BRANCH_NAME"; \
+	awk -v newline="- [$$NAME](https://github.com/$$GITHUB_USER), $$COMPANY" -v newname="$$NAME" ' \
+		BEGIN { inserted=0 } \
+		/^### Triagers$$/ { print; getline; print; in_triagers=1; next } \
+		in_triagers && /^- \[/ { \
+			current_name = $$0; \
+			sub(/^- \[/, "", current_name); \
+			sub(/\].*$$/, "", current_name); \
+			if (!inserted && newname < current_name) { \
+				print newline; \
+				inserted=1; \
+			} \
+			print; \
+			next; \
+		} \
+		in_triagers { \
+			if (!inserted) { print newline; inserted=1; } \
+			in_triagers=0; \
+		} \
+		{print}' README.md > README.md.tmp && mv README.md.tmp README.md; \
+	git add README.md; \
+	git commit -m "[chore] add $$NAME as triager"; \
+	git push; \
+	FORK_USER=$$(git config --get remote.origin.url | sed -n 's#.*github.com[:/]\([^/]*\)/.*#\1#p'); \
+	ENCODED_NAME=$$(echo "$$NAME" | sed 's/ /%20/g'); \
+	PR_URL="https://github.com/open-telemetry/opentelemetry-collector-contrib/compare/main...$${FORK_USER}:$$BRANCH_NAME?quick_pull=1&title=%5Bchore%5D%20Add%20$${ENCODED_NAME}%20as%20triager&body=This%20PR%20adds%20%5B$${ENCODED_NAME}%5D%28https%3A%2F%2Fgithub.com%2F$$GITHUB_USER%29%20as%20a%20new%20triager%20to%20the%20project.%0A%0A%40open-telemetry%2Fcollector-contrib-approvers%20please%20review%20their%20involvement%20with%20the%20project%20below%2C%20and%20consider%20approving%20this%20PR%20in%20support.%0A%0A%2A%20%5BIssues%20filed%5D%28https%3A%2F%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-collector-contrib%2Fissues%3Fq%3Dis%3Aissue%2Bauthor%3A$$GITHUB_USER%29%0A%2A%20%5BPRs%5D%28https%3A%2F%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-collector-contrib%2Fpulls%3Fq%3Dis%3Apr%2Bauthor%3A$$GITHUB_USER%29%0A%2A%20%5BPR%20comments%5D%28https%3A%2F%2Fgithub.com%2Fopen-telemetry%2Fopentelemetry-collector-contrib%2Fpulls%3Fq%3Dcommenter%3A$$GITHUB_USER%29"; \
+	open "$$PR_URL" 2>/dev/null || xdg-open "$$PR_URL" 2>/dev/null || start "$$PR_URL" 2>/dev/null || echo "$$PR_URL"
